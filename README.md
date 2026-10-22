@@ -36,3 +36,16 @@ npm run build   # tsc + esbuild → main.js
 ```
 
 Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.fragment/plugins/quick-anki/`.
+
+## Development
+
+```bash
+npm install
+FRAGMENT_VAULT="/path/to/your/vault" npm run dev   # PowerShell: $env:FRAGMENT_VAULT="C:\path	oault"; npm run dev
+```
+
+Each rebuild copies `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.fragment/plugins/quick-anki/` and runs
+`fragment plugin-reload id=quick-anki vault="<vault name>"`: the running Fragment
+reloads the plugin at once. Without `FRAGMENT_VAULT`, `npm run dev` only rebuilds
+`main.js`.
