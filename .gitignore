@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+*.js.map
+
+# Runtime plugin data
+data.json
+
+# OS / editor cruft
+.DS_Store
