@@ -2,6 +2,7 @@ import { Component, Notice } from 'fragment';
 import { annotationExtensions, annotationFilters, annotationKinds, annotationPresets, annotationTools,
 	type AnnotationSessionAPI, type AnnotationTool, type Stroke } from '@usefragment/annotation';
 import type QuickAnki from './main';
+import { DraftHandles, rectPoints } from './handles';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Les outils de cadrage : trois rectangles (recto, verso, cache) contribués aux
@@ -36,12 +37,13 @@ export function registerTools(plugin: QuickAnki): void {
 /** Un rectangle tiré d'un coin à l'autre (modèle : le crayon d'annotation). */
 function rectTool(plugin: QuickAnki, id: Outil, label: string, icon: string, order: number): AnnotationTool {
 	return { id, label, icon, order, begin: ({ session, anchorAt }, at) => {
+		// Hors de l'instance Quick Anki, l'outil ne trace rien (son cadre y serait invisible).
+		if (session.context.instance.preset !== PRESET) return null;
 		const anchor = anchorAt(at.clientX, at.clientY);
 		if (!anchor) return null;
 		const x0 = at.x - anchor.glyphX, y0 = at.y - anchor.glyphY;
 		let x1 = x0, y1 = y0;
-		// Coins DOUBLÉS : le tracé lisse de l'annotation (courbes par les milieux) devient des côtés droits.
-		const points = () => [[x0, y0], [x1, y0], [x1, y0], [x1, y1], [x1, y1], [x0, y1], [x0, y1], [x0, y0], [x0, y0]].map(([dx, dy]) => ({ dx, dy }));
+		const points = () => rectPoints(x0, y0, x1, y1);
 		const width = () => session.style.width * session.kind(id).widthFactor;
 		return {
 			move: (p) => { x1 = p.x - anchor.glyphX; y1 = p.y - anchor.glyphY; },
@@ -62,6 +64,7 @@ const deuxImages = () => new Promise((r) => requestAnimationFrame(() => requestA
 /** Le brouillon de la carte d'UN document, dans la session Quick Anki. */
 export class CardDraft extends Component {
 	draft: Draft = { caches: [] };
+	private handles: DraftHandles | null = null;
 
 	constructor(private plugin: QuickAnki, readonly session: AnnotationSessionAPI) {
 		super();
@@ -85,6 +88,10 @@ export class CardDraft extends Component {
 			});
 			this.register(() => scope.unregister(h));
 		}
+		this.handles = this.addChild(new DraftHandles(session, () => this.ids(), () => this.sync()));
+		// Un cadre change de taille (poignée, ANNULER / RÉTABLIR, texte qui se réagence) :
+		// sa boîte suit et son image est reprise — sinon la carte garderait l'ancienne.
+		this.registerEvent(session.on('change', () => this.sync()));
 		// Le document change : le brouillon ne vaut plus.
 		this.registerEvent(session.context.app.workspace.on('view-document-change', (view: unknown) => {
 			if (view === session.context.view) this.reset();
@@ -111,6 +118,41 @@ export class CardDraft extends Component {
 		this.changed();
 	}
 
+	private syncing = false;
+	private resync = false;
+
+	/** Recale la boîte (et l'image) de chaque cadre du brouillon sur son trait, une passe à la fois. */
+	private sync(): void {
+		if (this.syncing) { this.resync = true; return; }
+		this.syncing = true;
+		void (async () => {
+			try {
+				do {
+					this.resync = false;
+					await deuxImages();
+					const d = this.draft;
+					let changed = false;
+					for (const part of [d.recto, d.verso, ...d.caches]) {
+						const stroke = part && this.session.strokes().find((t) => t.id === part.strokeId);
+						const g = stroke && this.session.geometry(stroke);
+						if (!part || !stroke || !g || memeBoite(g, part.box)) continue;
+						part.box = { x: g.x, y: g.y, w: g.w, h: g.h };
+						if (!d.caches.includes(part)) part.png = (await this.capture(part.box, stroke.width)) ?? undefined;
+						changed = true;
+					}
+					if (changed) this.changed();
+				} while (this.resync);
+			} finally {
+				this.syncing = false;
+			}
+		})();
+	}
+
+	private ids(): string[] {
+		const d = this.draft;
+		return [d.recto, d.verso, ...d.caches].flatMap((p) => (p ? [p.strokeId] : []));
+	}
+
 	/** L'image de la zone à l'écran, sans son cadre, bornée au pane. */
 	private async capture(box: Box, width: number): Promise<Uint8Array | null> {
 		const { overlays, paneEl, app } = this.session.context;
@@ -135,6 +177,8 @@ export class CardDraft extends Component {
 
 	/** Entrée : la carte est enregistrée dans le paquet courant. */
 	async validate(): Promise<void> {
+		// Un recalage en cours (Ctrl+Z juste avant Entrée) : attendre l'image à jour.
+		while (this.syncing) await deuxImages();
 		const vivants = new Set(this.session.strokes().map((s) => s.id));
 		const d = this.draft;
 		if (d.recto && !vivants.has(d.recto.strokeId)) d.recto = undefined;
@@ -173,9 +217,12 @@ export class CardDraft extends Component {
 	}
 
 	private changed(): void {
+		this.handles?.render();
 		this.session.context.app.workspace.trigger('quick-anki:draft', this.session.doc);
 	}
 }
+
+const memeBoite = (a: Box, b: Box) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
 
 /** Le recto avec ses caches peints en aplats opaques, à leur place proportionnelle. */
 async function masquer(recto: Part, caches: Part[]): Promise<Uint8Array> {

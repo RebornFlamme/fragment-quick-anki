@@ -10,3 +10,6 @@ data.json
 
 # OS / editor cruft
 .DS_Store
+
+# e2e screenshots
+e2e/screens/

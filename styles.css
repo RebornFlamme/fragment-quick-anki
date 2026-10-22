@@ -1,18 +1,52 @@
-/* Quick Anki — les cadres : recto / verso en pointillés, cache en aplat (en traçant et une fois posés). */
-.annotation-stroke.mod-qa-recto path,
-.annotation-surface.mod-qa-recto .annotation-surface-trace path,
-.annotation-stroke.mod-qa-verso path,
-.annotation-surface.mod-qa-verso .annotation-surface-trace path {
-	stroke-dasharray: 7 5;
-}
+/* Quick Anki — les cadres : recto / verso en trait plein, cache en aplat (en traçant et une fois posés). */
 .annotation-stroke.mod-qa-cache path,
 .annotation-surface.mod-qa-cache .annotation-surface-trace path {
 	fill: #e0ac00;
 	fill-opacity: 1;
 }
 
+/* Les outils Quick Anki n'existent que dans SON instance : cachés des autres barres
+   (le registre d'annotation ne permet pas de réserver un outil à un preset). */
+.annotation-toolbar:not([data-instance="annotation:quick-anki"]) .toolbar-item:is([aria-label="Recto (r)"], [aria-label="Verso (v)"], [aria-label="Cache (c)"]) {
+	display: none;
+}
+/* Sa barre à elle : les trois outils et annuler / rétablir (la couleur est celle de l'outil).
+   Chaque item de la barre vit dans sa SECTION (`.toolbar-section`), précédée d'un séparateur :
+   on cache la section entière et le séparateur qui la précède. */
+.annotation-toolbar[data-instance="annotation:quick-anki"] .toolbar-section:has(> :is(.toolbar-item.mod-options, .toolbar-item[aria-label="Calques"])),
+.annotation-toolbar[data-instance="annotation:quick-anki"] .toolbar-separator:has(+ .toolbar-section > :is(.toolbar-item.mod-options, .toolbar-item[aria-label="Calques"])) {
+	display: none;
+}
+
+/* Les poignées d'un cadre du brouillon : redimensionner par les coins et les côtés. */
+.qa-handles {
+	position: absolute;
+	pointer-events: none;
+	z-index: 2;
+}
+.qa-handle {
+	position: absolute;
+	pointer-events: auto;
+	width: 10px;
+	height: 10px;
+	margin: -5px 0 0 -5px;
+	box-sizing: border-box;
+	border: 1.5px solid var(--qa-color);
+	border-radius: 2px;
+	background: var(--workspace-bg);
+	touch-action: none;
+}
+.qa-handle[data-h="nw"], .qa-handle[data-h="se"] { cursor: nwse-resize; }
+.qa-handle[data-h="ne"], .qa-handle[data-h="sw"] { cursor: nesw-resize; }
+.qa-handle[data-h="n"], .qa-handle[data-h="s"] { cursor: ns-resize; }
+.qa-handle[data-h="e"], .qa-handle[data-h="w"] { cursor: ew-resize; }
+.qa-handles.is-dragging {
+	outline: 1.5px solid var(--qa-color);
+}
+
 /* Pendant une capture, ni la barre d'annotation ni le widget ne sont dans l'image. */
 .qa-capturing .annotation-toolbar,
+.qa-capturing .qa-handles,
 .qa-capturing .doc-widget:has(.quick-anki-view) {
 	visibility: hidden;
 }
