@@ -97,15 +97,31 @@ export class Composer {
 		if (this.state) this.cancel();
 		// Une COPIE : le composeur recale ses boîtes en place, la carte d'origine reste intacte.
 		const lu = cardId ? readCard(await this.plugin.app.artefacts.state(cardId)) : null;
-		const card = lu ? structuredClone(lu) : null;
-		const r = card?.recto;
-		this.state = {
-			cardId: card ? cardId : null, recto: card?.recto ?? null, verso: card?.verso ?? null, created: [],
-			caches: r?.kind === 'zone' ? r.masks.map((m, i) => ({
-				doc: r.doc, stroke: r.maskStrokes[i] ?? '', box: { x: r.box.x + m.x * r.box.w, y: r.box.y + m.y * r.box.h, w: m.w * r.box.w, h: m.h * r.box.h },
-			})) : [],
-		};
+		this.state = { cardId: lu ? cardId : null, created: [], ...faces(lu) };
 		this.save();
+		this.plugin.app.workspace.trigger('quick-anki:compose');
+	}
+
+	/** Les deux faces posées sur une carte NEUVE : elle s'enregistre seule (la boucle r, v, r, v…). */
+	async autoSave(): Promise<void> {
+		const s = this.state;
+		if (s && !s.cardId && s.recto && s.verso) await this.validate({ auto: true });
+	}
+
+	/** « Annuler » de la Notice d'une carte enregistrée seule : elle redevient le brouillon. */
+	private reopen(id: string, card: Card): void {
+		this.plugin.app.artefacts.del(id, 'user');
+		if (this.state) this.cancel();
+		const f = faces(card);
+		this.state = { cardId: null, ...f, created: this.zonesOf(f) };
+		this.save();
+		this.plugin.app.workspace.trigger('quick-anki:compose');
+	}
+
+	/** Les traits d'une composition, avec leur document. */
+	private zonesOf(s: Pick<Compose, 'recto' | 'verso' | 'caches'>): { doc: string; stroke: string }[] {
+		return [s.recto, s.verso].flatMap((f) => (f?.kind === 'zone' ? [{ doc: f.doc, stroke: f.stroke }] : []))
+			.concat(s.caches.map((c) => ({ doc: c.doc, stroke: c.stroke })));
 	}
 
 	/** Pose (ou retire) une face. Un trait remplacé, tracé pendant la composition, part tout de suite. */
@@ -152,7 +168,7 @@ export class Composer {
 	}
 
 	/** Valider : la carte est écrite (nouvelle dans le paquet courant, ou l'existante mise à jour). */
-	async validate(): Promise<boolean> {
+	async validate(opts: { auto?: boolean } = {}): Promise<boolean> {
 		for (const d of this.plugin.drafts.values()) await d.idle();
 		const s = this.state;
 		const { artefacts } = this.plugin.app;
@@ -173,8 +189,10 @@ export class Composer {
 				masks: s.caches.map(({ box: c }) => ({ x: (c.x - r.x) / r.w, y: (c.y - r.y) / r.h, w: c.w / r.w, h: c.h / r.h })) };
 		}
 		const now = Date.now();
+		const neuve: Card = { deck: deck!, recto, verso: s.verso, createdAt: now, updatedAt: now };
+		let id = s.cardId;
 		if (old && s.cardId) artefacts.set(s.cardId, { state: { ...old, recto, verso: s.verso, updatedAt: now } satisfies Card }, 'user');
-		else artefacts.set(null, { type: CARD, scope: SCOPE, state: { deck: deck!, recto, verso: s.verso, createdAt: now, updatedAt: now } satisfies Card }, 'user');
+		else id = artefacts.set(null, { type: CARD, scope: SCOPE, state: neuve }, 'user');
 		// Les cadres de l'ancienne version qui ne servent plus partent.
 		if (old) {
 			const garde = new Set(this.strokes(s));
@@ -183,7 +201,15 @@ export class Composer {
 				.concat((avant?.maskStrokes ?? []).map((stroke) => ({ doc: avant!.doc, stroke })));
 			this.erase(anciens.filter((a) => !garde.has(a.stroke)));
 		}
+		const doc = [recto, s.verso].find((f) => f?.kind === 'zone') as Extract<Face, { kind: 'zone' }> | undefined;
 		this.end();
+		if (opts.auto && !old && id) {
+			const n = (await this.plugin.cards(deck!)).length;
+			const saved = id;
+			annulable(`Carte ${n} enregistrée`, () => this.reopen(saved, neuve));
+		}
+		// La boucle : la carte suivante, recto armé.
+		await this.plugin.loop(doc?.doc);
 		return true;
 	}
 
@@ -237,6 +263,29 @@ export class Composer {
 		for (const d of this.plugin.drafts.values()) d.render();
 		this.plugin.changed();
 	}
+}
+
+/** Les faces (copiées) d'une carte et ses caches remis en boîtes du document. */
+function faces(lu: Card | null): Pick<Compose, 'recto' | 'verso' | 'caches'> {
+	const card = lu ? structuredClone(lu) : null;
+	const r = card?.recto;
+	return {
+		recto: card?.recto ?? null, verso: card?.verso ?? null,
+		caches: r?.kind === 'zone' ? r.masks.map((m, i) => ({
+			doc: r.doc, stroke: r.maskStrokes[i] ?? '', box: { x: r.box.x + m.x * r.box.w, y: r.box.y + m.y * r.box.h, w: m.w * r.box.w, h: m.h * r.box.h },
+		})) : [],
+	};
+}
+
+/** Une Notice de 8 s avec un bouton « Annuler ». */
+export function annulable(message: string, rendre: () => void): void {
+	const frag = document.createDocumentFragment();
+	frag.append(`${message} — `);
+	const b = frag.appendChild(document.createElement('button'));
+	b.className = 'mod-cta qa-undo';
+	b.textContent = 'Annuler';
+	const notice = new Notice(frag, 8000);
+	b.onclick = (e) => { e.stopPropagation(); rendre(); notice.hide(); };
 }
 
 // ── Par session de l'instance Quick Anki : traits → composeur ─────────────
@@ -319,6 +368,7 @@ export class CardDraft extends Component {
 		if (this.composer.state !== s) return;
 		this.composer.setFace(tool === 'qa-recto' ? 'recto' : 'verso',
 			{ kind: 'zone', doc, stroke: stroke.id, box, png: png ? toBase64(png) : '', masks: [], maskStrokes: [] });
+		await this.composer.autoSave();
 	}
 
 	/** Recale la boîte (et l'image) de chaque cadre du composeur dans ce document, une passe à la fois. */

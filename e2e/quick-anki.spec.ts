@@ -79,6 +79,12 @@ const basDuWidget = (page: Page) => page.evaluate(() => {
 	const w = [...view.contentEl.querySelectorAll('.doc-widget')].find((x: any) => x.querySelector('.quick-anki-view')) as HTMLElement;
 	return Math.round(view.contentEl.getBoundingClientRect().bottom - w.getBoundingClientRect().bottom);
 });
+/** « Cartes (n) ▸ » : la liste par-dessus la carte en cours. */
+async function liste(page: Page): Promise<void> {
+	await page.locator(`${W} .qa-list-link`).click();
+	await expect(page.locator(`${W}[data-state="deck"]`)).toBeVisible();
+}
+const enBoucle = (page: Page, n: number) => expect(page.locator(`${W}[data-state="composer"] .qa-title`)).toHaveText(`Carte ${n}`);
 const capture = (page: Page, nom: string) => page.screenshot({ path: path.join(SHOTS, `${nom}.png`) });
 const pasDeCapture = (page: Page) => expect.poll(() => page.evaluate(() => document.body.classList.contains('qa-capturing'))).toBe(false);
 
@@ -123,12 +129,18 @@ test.describe.serial('Quick Anki', () => {
 		await h.page.locator('.qa-deck-parent-input').fill('MATHS Prepa');
 		await capture(h.page, 'qa3-A');
 		await h.page.locator('.qa-create-deck').click();
-		await expect(h.page.locator(`${W}[data-state="deck"]`)).toBeVisible();
+		// La BOUCLE par défaut : une carte neuve, recto armé.
+		await enBoucle(h.page, 1);
+		await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
+		await expect.poll(() => basDuWidget(h.page)).toBeGreaterThanOrEqual(10);
+		await capture(h.page, 'qa4-default');
+		await liste(h.page);
 		await expect(h.page.locator(`${W} .qa-path`)).toHaveText('MATHS Prepa::note');
+		await h.page.locator(`${W} .qa-back-card`).click();
+		await enBoucle(h.page, 1);
 	});
 
 	test('2. carte : recto ZONE + 2 caches, verso MARKDOWN (aperçu capturé) ; barres propres', async () => {
-		await h.page.locator('.qa-new-card').click();
 		await expect(h.page.locator(`${W}[data-state="composer"]`)).toBeVisible();
 		await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
 		// La barre par défaut sans outils Quick Anki ; la sienne : 3 outils + annuler / rétablir.
@@ -159,19 +171,18 @@ test.describe.serial('Quick Anki', () => {
 		await capture(h.page, 'qa3-markdown');
 		await modal.locator('.qa-md-ok').click();
 		await expect(modal).toHaveCount(0);
-		await expect(h.page.locator(`${W} .qa-face.is-verso .qa-thumb.is-markdown img`)).toBeVisible();
-		await pasDeCapture(h.page);
-		await expect.poll(() => basDuWidget(h.page)).toBeGreaterThanOrEqual(10);
-		await capture(h.page, 'qa3-C');
-
-		await h.page.locator(`${W} .qa-validate`).click();
-		await expect(h.page.locator(`${W}[data-state="deck"] .qa-row`)).toHaveCount(1);
+		// Verso posé sur une carte neuve : elle s'enregistre SEULE, la suivante commence.
+		await expect(h.page.locator('.notice', { hasText: 'Carte 1 enregistrée' })).toBeVisible();
+		await enBoucle(h.page, 2);
+		await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
 		const [c] = await cartes(h.page);
 		expect(c.state.recto.kind).toBe('zone');
 		expect(c.state.recto.masks).toHaveLength(2);
 		expect(c.state.verso).toMatchObject({ kind: 'markdown', text: expect.stringContaining('Théorème') });
 		expect(c.state.verso.png.slice(0, 8)).toBe('iVBORw0K');
-		expect(await composeur(h.page)).toBeNull();
+		expect(await composeur(h.page)).toMatchObject({ cardId: null, recto: null, verso: null });
+		await liste(h.page);
+		await expect(h.page.locator(`${W} .qa-row`)).toHaveCount(1);
 		await capture(h.page, 'qa3-B');
 	});
 
@@ -186,7 +197,7 @@ test.describe.serial('Quick Anki', () => {
 		await expect(h.page.locator(`${W} .qa-face.is-recto .qa-thumb img`)).toBeVisible();
 		await pasDeCapture(h.page);
 		await h.page.locator(`${W} .qa-validate`).click();
-		await expect(h.page.locator(`${W}[data-state="deck"]`)).toBeVisible();
+		await enBoucle(h.page, 2);
 		const [apres] = await cartes(h.page);
 		expect(apres.id).toBe(avant.id);
 		expect(apres.state.recto.stroke).not.toBe(avant.state.recto.stroke);
@@ -198,6 +209,7 @@ test.describe.serial('Quick Anki', () => {
 
 	test('4. Annuler (bouton, puis Échap) rend la carte d’origine intacte', async () => {
 		const [avant] = await cartes(h.page);
+		await liste(h.page);
 		await h.page.locator(`${W} .qa-row`).first().click();
 		await h.page.locator(`${W} .qa-face.is-recto .qa-remove`).click();
 		await h.page.locator(`${W} .qa-face.is-verso .qa-remove`).click();
@@ -223,7 +235,7 @@ test.describe.serial('Quick Anki', () => {
 		await h.page.locator(`${W} .qa-delete`).click();
 		await expect(h.page.locator(`${W} .qa-row`)).toHaveCount(0);
 		expect(await cartes(h.page)).toHaveLength(0);
-		await h.page.locator('.qa-undo').click();
+		await h.page.locator('.notice', { hasText: 'Carte supprimée' }).locator('.qa-undo').click();
 		await expect(h.page.locator(`${W} .qa-row`)).toHaveCount(1);
 		const [rendue] = await cartes(h.page);
 		expect(rendue.state).toEqual(avant.state);
@@ -235,7 +247,10 @@ test.describe.serial('Quick Anki', () => {
 			await app.workspace.getLeaf(false).openFile(app.vault.getFileByPath(p), { active: true });
 		}, AUTRE);
 		await h.page.locator('.workspace-leaf.mod-active .view-header .qa-header-action').click();
-		await expect(h.page.locator(`${W}[data-state="deck"]`)).toBeVisible();
+		await enBoucle(h.page, 2);
+		await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
+		await expect(h.page.locator(`${W} .qa-list-link`)).toHaveText('Cartes (1) ▸');
+		await liste(h.page);
 		await expect(h.page.locator(`${W} .qa-path`)).toHaveText('MATHS Prepa::note');
 		await expect(h.page.locator(`${W} .qa-row`)).toHaveCount(1);
 		const ecart = () => h.page.evaluate(() => {
@@ -268,6 +283,8 @@ test.describe.serial('Quick Anki', () => {
 		await h.page.locator(`${W} .qa-row`).first().click();
 		await h.page.locator(`${W} .qa-face.is-verso .qa-remove`).click();
 		await h.page.locator(`${W} .qa-validate`).click();
+		await enBoucle(h.page, 2);
+		await liste(h.page);
 		await expect(h.page.locator(`${W} .qa-row-status.is-modified`)).toHaveCount(1);
 		requetes.length = 0;
 		await h.page.locator(`${W} .qa-send`).click();
@@ -281,7 +298,7 @@ test.describe.serial('Quick Anki', () => {
 	});
 
 	test('8. le brouillon survit au rechargement du plugin', async () => {
-		await h.page.locator('.qa-new-card').click();
+		await h.page.locator(`${W} .qa-back-card`).click();
 		await h.page.locator(`${W} .qa-face.is-recto .qa-text`).click();
 		const modal = h.page.locator('.qa-md-modal');
 		await modal.locator('.qa-md-source').fill('Brouillon **persistant**');
@@ -305,5 +322,45 @@ test.describe.serial('Quick Anki', () => {
 		await h.page.waitForTimeout(300);
 		expect(await session(h.page, null, 'return s.strokes().length')).toBe(n);
 		await session(h.page, null, 's.setTool(null)');
+	});
+
+	test('10. la BOUCLE : recto, verso ×3 à la souris seule → 3 cartes dans l’ordre, recto armé après chacune', async () => {
+		await h.page.locator(`${W} .qa-new-card`).click();
+		await enBoucle(h.page, 2);
+		await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
+		const avant = (await cartes(h.page)).length;
+		for (let i = 0; i < 3; i++) {
+			const y = zone.y + zone.h * (0.15 + i * 0.25);
+			await tirer(h.page, X(), y, 180, 50);
+			await expect.poll(() => outilQA(h.page)).toBe('qa-verso');
+			await tirer(h.page, X() + 220, y, 160, 50);
+			await expect.poll(async () => (await cartes(h.page)).length).toBe(avant + i + 1);
+			await enBoucle(h.page, avant + i + 2);
+			await expect.poll(() => outilQA(h.page)).toBe('qa-recto');
+		}
+		await pasDeCapture(h.page);
+		await expect.poll(() => basDuWidget(h.page)).toBeGreaterThanOrEqual(10);
+		await capture(h.page, 'qa4-loop');
+		const toutes = (await cartes(h.page)).sort((a, b) => a.state.createdAt - b.state.createdAt).slice(avant);
+		expect(toutes.map((c) => [c.state.recto.kind, c.state.verso.kind])).toEqual([['zone', 'zone'], ['zone', 'zone'], ['zone', 'zone']]);
+		const ys = toutes.map((c) => c.state.recto.box.y);
+		expect([...ys].sort((a, b) => a - b)).toEqual(ys);
+	});
+
+	test('11. « Annuler » de la Notice : la carte enregistrée seule redevient le brouillon, cadres compris', async () => {
+		const avant = (await cartes(h.page)).sort((a, b) => a.state.createdAt - b.state.createdAt);
+		const derniere = avant.at(-1)!;
+		await h.page.locator('.notice', { hasText: `Carte ${avant.length} enregistrée` }).locator('.qa-undo').click();
+		await expect.poll(async () => (await cartes(h.page)).length).toBe(avant.length - 1);
+		await expect(h.page.locator(`${W}[data-state="composer"] .qa-title`)).toHaveText(`Carte ${avant.length}`);
+		expect(await composeur(h.page)).toMatchObject({ cardId: null, recto: { stroke: derniere.state.recto.stroke }, verso: { stroke: derniere.state.verso.stroke } });
+		const traits = await h.page.locator('.annotation-stroke.mod-qa-verso').count();
+		// Refaire juste le verso puis le retracer : la carte se réenregistre.
+		await h.page.locator(`${W} .qa-face.is-verso .qa-redo`).click();
+		await expect.poll(() => outilQA(h.page)).toBe('qa-verso');
+		await expect(h.page.locator('.annotation-stroke.mod-qa-verso')).toHaveCount(traits - 1);
+		await tirer(h.page, X() + 220, zone.y + zone.h * 0.62, 120, 40);
+		await expect.poll(async () => (await cartes(h.page)).length).toBe(avant.length);
+		await enBoucle(h.page, avant.length + 1);
 	});
 });

@@ -22,16 +22,31 @@ export class QuickAnkiView extends ItemView {
 	private rendu = 0;
 	/** Les saisies de l'état A, gardées d'un rendu à l'autre. */
 	private form: { name: string; parent: string } | null = null;
+	/** La liste des cartes montrée PAR-DESSUS la carte en cours (« Cartes (n) ▸ »). */
+	private liste = false;
 
-	constructor(leaf: WorkspaceLeaf, private plugin: QuickAnki) {
+	constructor(leaf: WorkspaceLeaf, private readonly origine: QuickAnki) {
 		super(leaf);
 		this.icon = 'layers';
+	}
+
+	/**
+	 * Le plugin VIVANT : une vue hébergée dans un widget survit à un rechargement du
+	 * plugin (la feuille détachée n'est pas reconstruite) ; elle parlerait sinon à
+	 * l'ancienne instance (son composeur, ses sessions démontées).
+	 */
+	private get plugin(): QuickAnki {
+		const vivant = (this.app as unknown as { plugins?: { plugins?: Map<string, unknown> } }).plugins?.plugins?.get('quick-anki');
+		return (vivant as QuickAnki | undefined) ?? this.origine;
 	}
 
 	getViewType(): string { return VIEW_TYPE; }
 	getDisplayText(): string { return 'Quick Anki'; }
 	getIcons(): string[] { return this.isWidget() ? this.icons : ['layers']; }
 	docWidgetActions(): string[] { return ['tab', 'collapse']; }
+
+	/** Le document hôte : celui du widget, sinon (vue reconstruite sans placement) la vue de document active. */
+	private get hote(): string | null { return this.doc ?? this.plugin.documentView()?.getDocument() ?? null; }
 
 	/** Hébergée dans un widget (feuille détachée), elle montre le paquet courant ; en onglet, les paquets. */
 	private isWidget(): boolean { return this.doc !== null || this.leaf.parent === null; }
@@ -45,6 +60,8 @@ export class QuickAnkiView extends ItemView {
 	protected async onOpen(): Promise<void> {
 		this.contentEl.classList.add('quick-anki-view');
 		this.registerEvent(this.app.workspace.on('quick-anki:changed', () => void this.render()));
+		// Une composition commence (boucle, carte ouverte) : on la montre.
+		this.registerEvent(this.app.workspace.on('quick-anki:compose', () => { this.liste = false; void this.render(); }));
 		// Sa hauteur change d'un état à l'autre : le widget se recale en bas.
 		const ro = new ResizeObserver(() => this.plugin.repinSoon());
 		ro.observe(this.contentEl);
@@ -64,7 +81,7 @@ export class QuickAnkiView extends ItemView {
 			const s = this.plugin.composer.state;
 			el.dataset.mode = 'widget';
 			if (!current && !s?.cardId) this.renderNewDeck(el, decks);
-			else if (s) this.renderComposer(el, mine, cards);
+			else if (s && !(this.liste && current)) this.renderComposer(el, mine, cards);
 			else this.renderDeck(el, current!, mine);
 			this.setIcons(['layers', String(mine.length)]);
 		} else {
@@ -83,7 +100,7 @@ export class QuickAnkiView extends ItemView {
 
 	private renderNewDeck(el: HTMLElement, decks: { id: string; state: Deck }[]): void {
 		el.dataset.state = 'new-deck';
-		const docName = (this.doc?.split('/').pop() ?? '').replace(/\.[^.]+$/, '');
+		const docName = (this.hote?.split('/').pop() ?? '').replace(/\.[^.]+$/, '');
 		// Le nom du document tant que l'utilisateur n'a rien saisi (le document arrive après le 1er rendu).
 		const form = this.form ?? { name: docName, parent: '' };
 		line(el, 'qa-title', 'Nouveau paquet');
@@ -106,13 +123,14 @@ export class QuickAnkiView extends ItemView {
 			if (!name) { new Notice('Donne un nom au paquet.'); return; }
 			this.form = null;
 			await this.plugin.createDeck(name, form.parent.trim().replace(/::$/, ''));
+			await this.plugin.loop(this.hote);
 		}, 'mod-cta qa-create-deck');
 		for (const input of [nom, dans]) input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); creer.click(); } };
 		const autres = decks.filter((d) => !d.state.sentAt);
 		if (autres.length) {
 			line(el, 'qa-hint', 'ou reprendre :');
 			for (const d of autres.slice(0, 5)) {
-				const b = button(el, fullName(d.state), () => void this.plugin.setCurrent(d.id), 'qa-link qa-resume');
+				const b = button(el, fullName(d.state), async () => { await this.plugin.setCurrent(d.id); await this.plugin.loop(this.hote); }, 'qa-link qa-resume');
 				b.title = 'Reprendre ce paquet';
 			}
 		}
@@ -135,7 +153,7 @@ export class QuickAnkiView extends ItemView {
 			const row = list.appendChild(document.createElement('div'));
 			row.className = 'qa-row';
 			row.dataset.card = c.id;
-			row.onclick = () => void this.plugin.composer.start(c.id);
+			row.onclick = () => { this.liste = false; void this.plugin.composer.start(c.id); };
 			line(row, 'qa-row-n', String(i + 1));
 			row.appendChild(thumb(c.state.recto));
 			row.appendChild(thumb(c.state.verso));
@@ -145,10 +163,8 @@ export class QuickAnkiView extends ItemView {
 		});
 		const actions = el.appendChild(document.createElement('div'));
 		actions.className = 'qa-actions';
-		button(actions, '+ Nouvelle carte', async () => {
-			await this.plugin.composer.start(null);
-			if (this.doc) this.plugin.arm(this.doc, 'qa-recto');
-		}, 'qa-new-card');
+		if (this.plugin.composer.state) button(actions, '← Carte en cours', () => { this.liste = false; void this.render(); }, 'qa-back-card');
+		else button(actions, '+ Nouvelle carte', () => this.plugin.loop(this.hote), 'qa-new-card');
 		button(actions, `Envoyer à Anki (${aEnvoyer})`, () => void sendDeck(this.plugin, deck.id), 'mod-cta qa-send').disabled = !aEnvoyer;
 	}
 
@@ -182,7 +198,12 @@ export class QuickAnkiView extends ItemView {
 		el.dataset.state = 'composer';
 		const index = s.cardId ? mine.findIndex((c) => c.id === s.cardId) : -1;
 		const numero = index >= 0 ? index + 1 : s.cardId ? '' : mine.length + 1;
-		line(el, 'qa-title', `Carte ${numero}${s.cardId ? ' · modification' : ''}`);
+		const head = el.appendChild(document.createElement('div'));
+		head.className = 'qa-head';
+		line(head, 'qa-title', `Carte ${numero}${s.cardId ? ' · modification' : ''}`);
+		// La liste reste à un clic ; la carte en cours attend.
+		button(head, `Cartes (${mine.length}) ▸`, () => { this.liste = true; void this.render(); }, 'qa-link qa-list-link');
+		if (!s.cardId) line(el, 'qa-hint qa-loop-hint', 'r : recto · v : verso · c : cache — la carte s’enregistre au verso');
 		for (const side of ['recto', 'verso'] as const) this.renderFace(el, side, s[side], numero);
 		const actions = el.appendChild(document.createElement('div'));
 		actions.className = 'qa-actions';
@@ -206,11 +227,13 @@ export class QuickAnkiView extends ItemView {
 		const head = box.appendChild(document.createElement('div'));
 		head.className = 'qa-face-head';
 		line(head, 'qa-face-label', NOMS[side].toUpperCase());
-		const zone = () => { if (this.doc) this.plugin.arm(this.doc, side === 'recto' ? 'qa-recto' : 'qa-verso'); };
+		const zone = () => { if (this.hote) void this.plugin.arm(this.hote, side === 'recto' ? 'qa-recto' : 'qa-verso'); };
 		const texte = async (initial: string) => {
-			const doc = face?.kind === 'zone' ? face.doc : this.doc ?? '';
+			const doc = face?.kind === 'zone' ? face.doc : this.hote ?? '';
 			const r = await editMarkdown(this.app, `Carte ${numero} — ${NOMS[side]}`, initial, doc);
-			if (r && composer.state) composer.setFace(side, { kind: 'markdown', text: r.text, png: toBase64(r.png) });
+			if (!r || !composer.state) return;
+			composer.setFace(side, { kind: 'markdown', text: r.text, png: toBase64(r.png) });
+			await composer.autoSave();
 		};
 		if (!face) {
 			button(head, `Zone (${side[0]})`, zone, 'qa-zone');
@@ -231,7 +254,7 @@ export class QuickAnkiView extends ItemView {
 			const n = composer.state?.caches.length ?? 0;
 			const row = box.appendChild(document.createElement('div'));
 			row.className = 'qa-face-foot';
-			button(row, '+ Cache (c)', () => { if (this.doc) this.plugin.arm(this.doc, 'qa-cache'); }, 'qa-link qa-add-cache');
+			button(row, '+ Cache (c)', () => { if (this.hote) void this.plugin.arm(this.hote, 'qa-cache'); }, 'qa-link qa-add-cache');
 			line(row, 'qa-hint qa-cache-count', `${n} cache(s)`);
 		}
 	}
@@ -246,7 +269,7 @@ export class QuickAnkiView extends ItemView {
 
 	/** Le texte sélectionné dans la note hôte (préremplit une face Markdown). */
 	private selection(): string {
-		const view = this.doc ? this.plugin.viewOf(this.doc) : null;
+		const view = this.hote ? this.plugin.viewOf(this.hote) : null;
 		const editor = (view as unknown as { editor?: { getSelection?(): string } } | null)?.editor;
 		// L'éditeur de Fragment rend une PLAGE ({from, to}) ; repli : la sélection du DOM.
 		const sel = editor?.getSelection?.() as unknown as { from: number; to: number } | string | undefined;

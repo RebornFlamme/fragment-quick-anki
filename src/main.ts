@@ -1,6 +1,6 @@
 import { ItemView, Modal, Notice, Plugin, Setting, defineRegistry, type ViewState } from 'fragment';
 import type { AnnotationSessionAPI } from '@usefragment/annotation';
-import { CardDraft, Composer, PRESET, registerTools } from './tools';
+import { CardDraft, Composer, PRESET, annulable, registerTools } from './tools';
 import { QuickAnkiView, VIEW_TYPE } from './view';
 import { deleteNotes } from './anki';
 import { CARD, DECK, SCOPE, readCard, readDeck, status, type Card, type Deck } from './model';
@@ -103,6 +103,8 @@ export default class QuickAnki extends Plugin {
 			const view = leaf.view;
 			if (!(view instanceof ItemView) || leaf.parent === null || !view.getDocument() || view instanceof QuickAnkiView) return;
 			vivantes.add(view);
+			// Un widget déjà là (rechargement du plugin, layout restauré) : il est recalé lui aussi.
+			if (this.widgetOf(view.getDocument()!)) this.observe(view);
 			if (this.buttons.has(view)) return;
 			const el = view.addAction('copy-plus', 'Quick Anki', () => this.toggle(view));
 			el.classList.add('qa-header-action');
@@ -140,6 +142,11 @@ export default class QuickAnki extends Plugin {
 			viewState: { type: VIEW_TYPE, state: {} }, file: doc, from: 0, to: 0, open: true,
 			anchor: { mode: 'viewport', x: MARGE, y: Math.max(MARGE, view.contentEl.clientHeight - 320) },
 		});
+		this.observe(view);
+		void this.loop(doc);
+	}
+
+	private observe(view: ItemView): void {
 		if (!this.observers.has(view)) {
 			const ro = new ResizeObserver(() => this.repinSoon());
 			ro.observe(view.contentEl);
@@ -168,19 +175,37 @@ export default class QuickAnki extends Plugin {
 		this.app.artefacts.set(id, { anchor: { mode: 'viewport', x: MARGE, y } }, 'follow');
 	}
 
-	/** Ctrl+Maj+K : le widget, et une carte neuve, recto en zone. */
+	/** Ctrl+Maj+K : le widget, et la carte suivante, recto armé. */
 	async newCard(view: ItemView): Promise<void> {
 		this.showWidget(view);
+	}
+
+	/**
+	 * La BOUCLE par défaut : dès qu'un paquet est courant, une carte neuve est en cours
+	 * et l'outil de sa prochaine face est armé (r, v, r, v…). Une composition en cours
+	 * (brouillon, édition) est gardée.
+	 */
+	async loop(cible?: string | null): Promise<void> {
+		const doc = cible ?? this.documentView()?.getDocument() ?? null;
+		if (!this.currentDeck()) return;
 		if (!this.composer.state) await this.composer.start(null);
-		if (this.currentDeck()) this.arm(view.getDocument()!, 'qa-recto');
+		const s = this.composer.state;
+		if (!doc || !s || s.cardId) return;
+		const tool = !s.recto ? 'qa-recto' : !s.verso ? 'qa-verso' : null;
+		if (tool) await this.arm(doc, tool);
 	}
 
 	/** Arme un outil Quick Anki sur la vue du document (l'instance est montée au besoin). */
-	arm(doc: string, tool: string | null): void {
+	async arm(doc: string, tool: string | null): Promise<void> {
 		const view = this.viewOf(doc);
 		if (!view) return;
 		if (tool && !view.isLayerActive('annotation', PRESET)) view.toggleLayer('annotation', PRESET);
-		[...this.drafts.values()].find((d) => d.session.context.view === view)?.session.setTool(tool);
+		// La session de l'instance naît avec le calque : elle peut arriver une image plus tard.
+		for (let i = 0; i < 30; i++) {
+			const d = [...this.drafts.values()].find((x) => x.session.context.view === view);
+			if (d) { d.session.setTool(tool); return; }
+			await new Promise((r) => requestAnimationFrame(r));
+		}
 	}
 
 	async openWindow(): Promise<void> {
@@ -271,17 +296,6 @@ export default class QuickAnki extends Plugin {
 			this.changed();
 		});
 	}
-}
-
-/** Une Notice de 8 s avec un bouton « Annuler ». */
-export function annulable(message: string, rendre: () => void): void {
-	const frag = document.createDocumentFragment();
-	frag.append(`${message} — `);
-	const b = frag.appendChild(document.createElement('button'));
-	b.className = 'mod-cta qa-undo';
-	b.textContent = 'Annuler';
-	const notice = new Notice(frag, 8000);
-	b.onclick = (e) => { e.stopPropagation(); rendre(); notice.hide(); };
 }
 
 /** Une question oui / non (non par défaut). */

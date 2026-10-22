@@ -428,3 +428,11 @@
 	justify-content: flex-end;
 	gap: 8px;
 }
+
+/* La boucle : la liste à un clic, l'aide des touches. */
+.quick-anki-view .qa-list-link {
+	white-space: nowrap;
+}
+.quick-anki-view .qa-loop-hint {
+	margin-top: -2px;
+}
