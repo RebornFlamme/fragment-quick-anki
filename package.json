@@ -17,6 +17,7 @@
 	"devDependencies": {
 		"@codemirror/state": "^6.4.1",
 		"@types/node": "^20.11.0",
+		"@usefragment/annotation": "^0.1.1",
 		"@usefragment/core": "^0.3.0",
 		"builtin-modules": "^3.3.0",
 		"esbuild": "^0.21.5",

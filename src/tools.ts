@@ -1,6 +1,6 @@
 import { Component, Notice } from 'fragment';
 import { annotationExtensions, annotationFilters, annotationKinds, annotationPresets, annotationTools,
-	type AnnotationSessionAPI, type AnnotationTool, type Stroke } from './annotation';
+	type AnnotationSessionAPI, type AnnotationTool, type Stroke } from '@usefragment/annotation';
 import type QuickAnki from './main';
 
 // ═══════════════════════════════════════════════════════════════════════════
