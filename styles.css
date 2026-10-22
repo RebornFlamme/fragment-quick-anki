@@ -1,22 +1,118 @@
-/*
- * Styles for the Fragment sample plugin.
- *
- * Fragment loads this file alongside the plugin. Prefer theme CSS variables
- * (the same ones Obsidian exposes) over hard-coded colours so the plugin
- * follows the active theme.
- */
-
-.fragment-sample-view {
-	padding: var(--size-4-4, 16px);
+/* Quick Anki — les cadres : recto / verso en pointillés, cache en aplat (en traçant et une fois posés). */
+.annotation-stroke.mod-qa-recto path,
+.annotation-surface.mod-qa-recto .annotation-surface-trace path,
+.annotation-stroke.mod-qa-verso path,
+.annotation-surface.mod-qa-verso .annotation-surface-trace path {
+	stroke-dasharray: 7 5;
+}
+.annotation-stroke.mod-qa-cache path,
+.annotation-surface.mod-qa-cache .annotation-surface-trace path {
+	fill: #e0ac00;
+	fill-opacity: 1;
 }
 
-.fragment-sample-view__header {
+/* Pendant une capture, ni la barre d'annotation ni le widget ne sont dans l'image. */
+.qa-capturing .annotation-toolbar,
+.qa-capturing .doc-widget:has(.quick-anki-view) {
+	visibility: hidden;
+}
+
+/* ── Le widget : les stats du paquet courant ── */
+.view-content.quick-anki-view[data-mode='widget'] {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px 14px 14px;
+	min-width: 250px;
+	font-size: var(--font-ui-small, 13px);
+}
+.quick-anki-view .qa-title,
+.quick-anki-view .qa-heading {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+.quick-anki-view .qa-stat,
+.quick-anki-view .qa-deck-meta,
+.quick-anki-view .qa-empty {
+	color: var(--text-muted);
+}
+.quick-anki-view .qa-send {
+	margin-top: 8px;
+	align-self: stretch;
+	justify-content: center;
+}
+
+/* ── La fenêtre : les paquets et leurs cartes ── */
+.quick-anki-view[data-mode='window'] {
+	padding: 24px;
+	overflow-y: auto;
+}
+.quick-anki-view .qa-heading {
+	font-size: 1.15em;
+	margin: 16px 0 8px;
+}
+.quick-anki-view .qa-deck {
 	display: flex;
 	align-items: center;
-	gap: var(--size-4-2, 8px);
-	margin-bottom: var(--size-4-3, 12px);
+	gap: 8px;
+	padding: 6px 8px;
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
 }
-
-.fragment-sample-view__header h2 {
-	margin: 0;
+.quick-anki-view .qa-deck:hover {
+	background: var(--background-modifier-hover);
+}
+.quick-anki-view .qa-deck.is-selected {
+	background: var(--background-primary-alt);
+	box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+.quick-anki-view .qa-deck-name {
+	flex: 1;
+	min-width: 0;
+	background: transparent;
+	border: 1px solid transparent;
+	color: var(--text-normal);
+	font: inherit;
+	padding: 2px 4px;
+	border-radius: var(--radius-s, 4px);
+}
+.quick-anki-view .qa-deck-name:hover,
+.quick-anki-view .qa-deck-name:focus {
+	border-color: var(--background-modifier-border);
+}
+.quick-anki-view .qa-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+	gap: 12px;
+}
+.quick-anki-view .qa-card {
+	position: relative;
+	display: grid;
+	grid-template-columns: 1fr;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary-alt);
+}
+.quick-anki-view .qa-card img {
+	display: block;
+	width: 100%;
+	max-height: 180px;
+	object-fit: contain;
+	border-radius: 4px;
+	background: var(--background-secondary);
+}
+.quick-anki-view .qa-card.is-sent {
+	opacity: 0.7;
+}
+.quick-anki-view .qa-card .qa-icon {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	opacity: 0;
+}
+.quick-anki-view .qa-card:hover .qa-icon {
+	opacity: 1;
 }

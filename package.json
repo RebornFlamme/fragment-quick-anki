@@ -1,7 +1,7 @@
 {
-	"name": "fragment-sample-plugin",
+	"name": "fragment-quick-anki",
 	"version": "1.0.0",
-	"description": "A sample plugin for Fragment, built on the @usefragment/core type contract.",
+	"description": "Quick Anki for Fragment: frame a zone, it becomes an Anki card.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -17,7 +17,8 @@
 	"devDependencies": {
 		"@codemirror/state": "^6.4.1",
 		"@types/node": "^20.11.0",
-		"@usefragment/core": "^0.1.0",
+		"@usefragment/annotation": "file:../Fragment/packages/annotation",
+		"@usefragment/core": "file:../Fragment/packages/core",
 		"builtin-modules": "^3.3.0",
 		"esbuild": "^0.21.5",
 		"tslib": "^2.6.3",

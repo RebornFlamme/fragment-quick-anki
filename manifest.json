@@ -1,8 +1,10 @@
 {
-	"id": "fragment-sample-plugin",
-	"name": "Sample Plugin",
+	"id": "quick-anki",
+	"name": "Quick Anki",
 	"version": "1.0.0",
-	"minAppVersion": "0.1.0",
-	"description": "A sample plugin demonstrating the Fragment plugin API: commands, an editor command, a ribbon icon, a custom view, a modal and persisted settings.",
-	"author": "RebornFlamme"
+	"minAppVersion": "0.1.15",
+	"description": "Frame a zone of a note or PDF: recto, verso, masks — it becomes an Anki card. Decks are stored in the vault and sent to Anki when finished.",
+	"author": "RebornFlamme",
+	"authorUrl": "https://github.com/RebornFlamme",
+	"isDesktopOnly": true
 }
