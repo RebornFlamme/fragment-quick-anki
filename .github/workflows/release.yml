@@ -1,0 +1,45 @@
+name: Release Fragment plugin
+
+# Push a tag equal to the version in manifest.json (no "v" prefix: `npm version patch`
+# creates it thanks to .npmrc), and this builds the plugin and publishes a GitHub
+# release with the three files Fragment downloads: main.js, manifest.json, styles.css.
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build plugin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check the tag matches manifest.json
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          if [ "$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match manifest.json version $version" && exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title="${GITHUB_REF_NAME}" \
+            --generate-notes \
+            main.js manifest.json styles.css

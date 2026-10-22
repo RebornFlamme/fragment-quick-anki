@@ -1,5 +1,5 @@
 import { ItemView, Plugin, defineRegistry, type ViewState } from 'fragment';
-import type { AnnotationSessionAPI } from '@usefragment/annotation';
+import type { AnnotationSessionAPI } from './annotation';
 import { CardDraft, PRESET, registerTools } from './tools';
 import { QuickAnkiView, VIEW_TYPE } from './view';
 
