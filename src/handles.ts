@@ -1,6 +1,6 @@
 import { Component } from 'fragment';
 import type { AnnotationSessionAPI, Stroke } from '@usefragment/annotation';
-import type { Box } from './tools';
+import type { Box } from './model';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Les poignées des cadres du brouillon : 4 coins + 4 côtés, pour redimensionner
